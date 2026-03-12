@@ -6,6 +6,9 @@
 #include <stdio.h>
 #include <SDL.h>
 #include <SDL_opengl.h>
+#include <vector>
+#include "Constants.h"
+#include "Entities.h"
 #include <gl/GLU.h>
 //---------------------------------------------------------------------
 #define For(i,N) for (int (i) = 0; (i) < (N); (i)++)
@@ -15,7 +18,16 @@ public:
     //-------------------------------------------------------
     Game(void);
     ~Game(void);
-    //-------------------------------------------------------
+    
+	void  Update(float dt);
+
+	Player players[2];
+	std::vector<Asteroid> asteroids;
+	std::vector<Projectile> projectiles;
+
+    bool keys[256]; // track held keys
+    float deltatime;
+
     void  InitGFX();
     void  ChangeSize(int w, int h);
     void  Draw();

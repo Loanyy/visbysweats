@@ -40,9 +40,20 @@ static void mainLoop (){
     SDL_Event event;
     bool quit = false;
     int key, state;
+
+    Uint32 LastTime = SDL_GetTicks();
+    float deltatime = 0.0f;
+
     while (!quit) {
-        //----------------------------------
+        
+        Uint32 CurrentTime = SDL_GetTicks();
+        deltatime = (CurrentTime - LastTime) / 1000.0f;
+        LastTime = CurrentTime;
+
 		while (SDL_PollEvent(&event)) {
+
+			
+
 			switch (event.type) {
 					//Mouse
 				case SDL_MOUSEBUTTONDOWN:
@@ -62,16 +73,21 @@ static void mainLoop (){
                     state = SDL_GetModState();
 					//---------------------------------
                     if (key == SDLK_ESCAPE){quit = true; break;}
-                    //---------------------------------
+					if (key < 256) G.keys[key] = true;
 					if (key < 128) G.NormalKeys(key,state);
 					else G.SpecialKeys(key,state);
 					break;
-					//---------------------------------
+
+			    case SDL_KEYUP:
+                    key   = event.key.keysym.sym;
+                    if (key < 256) G.keys[key] = false;
+                    break;
 				case SDL_QUIT: quit = true; break;
 				default: break;
 			}
         }
-        //----------------------------------
+        
+		G.Update(deltatime);
 		G.Draw();
         SDL_GL_SwapWindow(gScreen);
         SDL_Delay(8);

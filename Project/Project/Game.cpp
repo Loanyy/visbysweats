@@ -17,6 +17,22 @@ Game::Game(){
     mMouseButton = mMouseState = 0;
     mQuadratic = gluNewQuadric();   
     gluQuadricNormals(mQuadratic, GLU_SMOOTH);
+	memset(keys, false, sizeof(keys));
+	deltatime = 0.f;
+
+    //player 0 init
+	players[0].id = 0;
+    players[0].x = -5.0f;
+    players[0].z = 0.0f;
+	players[0].rotation = 0.0f;
+    players[0].vx = 0.0f;
+	players[0].vz = 0.0f;
+	players[0].lives = PLAYER_START_LIVES;
+	players[0].score = 0;
+	players[0].shootCooldown = 0.0f;
+	players[0].invulnTime = 0.0f;
+	players[0].alive = true;
+
 }
 //---------------------------------------------------------------------
 //---------------------------------------------------------------------
@@ -100,23 +116,18 @@ void Game::Draw(void){
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glLoadIdentity();
     
-    double r = 5.;
-    double time = double(SDL_GetTicks())/1000.;
-    
-    bool demo = true;
-    if (demo) gluLookAt(r*cos(time),r*(.9 + sin(.5*time)),r*cos(.1*time),0,0,0,0,1,0);//A single line demo
-    else gluLookAt(r,r,r,0.,0.,0.,0.,1.,0.);
+	gluLookAt(0, 90, 0.1, 0, 0, 0, 0, 1, 0);  // eye, center, up
     
     //-----------------------
     glLineWidth(1);
-    glColor3ub(255,255,255);
-    int n = 5;
-    For (i,2*n+1){
+    glColor3ub(40, 40, 40);
+    int n = (int)WORLD_SIZE;
+    for (int i = -n; i <= n; i += 5) {
         glBegin(GL_LINES);
-        glVertex3f(-n,0,i-n);
-        glVertex3f(n,0,i-n);
-        glVertex3f(i-n,0,-n);
-        glVertex3f(i-n,0,n);
+        glVertex3f((float)-n, 0, (float)i);
+        glVertex3f((float)n, 0, (float)i);
+        glVertex3f((float)i, 0, (float)-n);
+        glVertex3f((float)i, 0, (float)n);
         glEnd();
     }
     
@@ -152,7 +163,33 @@ void Game::Draw(void){
     glTranslatef(0,0,-1);
     gluCylinder(mQuadratic,.01,.01,1.,32,32);
     glPopMatrix();
-    //-----------------------
+
+    //Player0
+
+	glColor3ub(0, 255, 128);
+	glPushMatrix();
+	glTranslatef(players[0].x, 0.3f, players[0].z);
+	glRotatef(players[0].rotation, 0, 1, 0);//
+	glScalef(2.0f, 2.0f, 2.0f);
+
+        //simple arrow shape
+    glBegin(GL_TRIANGLES);
+	    //front
+	    glVertex3f(1.0f, 0.0f, 0.0f);
+        //left wing
+	    glVertex3f(-0.5f, 0.0f, 0.6f);
+	    //right wing
+	    glVertex3f(-0.5f, 0.0f, -0.6f);
+
+	glEnd();
+    
+        //top face
+    glBegin(GL_TRIANGLES);
+	    glVertex3f(1.0f, 0.2f, 0.0f);
+	    glVertex3f(-0.5f, 0.2f, -0.6f);
+	    glVertex3f(-0.5f, 0.2f, 0.6f);
+        glEnd();
+		glPopMatrix();
 
 	//--------------------------------------------	
     mCounter++;
@@ -186,3 +223,46 @@ void Game::MouseMotion(int x, int y){
 };
 //---------------------------------------------------------------------
 //---------------------------------------------------------------------
+void Game::Update(float dt) { // GAME UPDATE FULL OGRENILCEK.
+    deltatime = dt;
+	if (dt <= 0.0f || dt > 0.1f) return; // skip bad frames
+
+
+	Player& p = players[0];
+	if (!p.alive) return;
+
+    //rotation
+    if (keys['a'] || keys [SDLK_LEFT & 0xFF])
+		p.rotation += PLAYER_ROTATION_SPEED * dt;
+    if (keys['d'] || keys[SDLK_RIGHT & 0xFF])
+        p.rotation -= PLAYER_ROTATION_SPEED * dt;
+
+	// direction from rotation (rotation 0 = facing -x)
+	float rad = p.rotation * M_PI / 180.0f;
+	float dirX = cosf(rad);
+	float dirZ = -sinf(rad);
+
+    //thrust 
+    if (keys['w'] || keys[SDLK_UP & 0xFF]){
+        p.vx += dirX * PLAYER_ACCELERATION * dt;
+        p.vz += dirZ * PLAYER_ACCELERATION * dt;
+	}
+
+    //drag
+	p.vx -= p.vx * PLAYER_DRAG * dt;
+    p.vz -= p.vz * PLAYER_DRAG * dt;
+	
+    //speed clamp
+	float speed = sqrtf(p.vx * p.vx + p.vz * p.vz);
+
+    //move
+	p.x += p.vx * dt;
+    p.z += p.vz * dt;
+
+	//wrap around
+	if (p.x > WORLD_SIZE) p.x -= 2 * WORLD_SIZE;
+	if (p.x < -WORLD_SIZE) p.x += 2 * WORLD_SIZE;
+	if (p.z > WORLD_SIZE) p.z -= 2 * WORLD_SIZE;
+	if (p.z < -WORLD_SIZE) p.z += 2 * WORLD_SIZE;
+
+}
