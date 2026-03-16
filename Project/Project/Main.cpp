@@ -29,7 +29,7 @@ static void createSurface(){
     gScreen = SDL_CreateWindow("GFX",
                                SDL_WINDOWPOS_UNDEFINED,
                                SDL_WINDOWPOS_UNDEFINED,
-                               G.mW, G.mH,
+                               (int)G.mW, (int)G.mH,
                                SDL_WINDOW_OPENGL);
     SDL_GL_CreateContext(gScreen);
     //----------------------------------
