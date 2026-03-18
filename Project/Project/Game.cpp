@@ -9,42 +9,171 @@ Game::Game() {
     mQuadratic = gluNewQuadric();
     gluQuadricNormals(mQuadratic, GLU_SMOOTH);
     memset(keys, false, sizeof(keys));
-    deltatime = 0.f;
+    menuSelection = 0;
+    strcpy(nickname, "");
+    strcpy(player1Name, "P1");
+    strcpy(player2Name, "P2");
+    enteringNickname = false;
+    nicknameLen = 0;
+    lobbyChoice = -1;
+    strcpy(lobbyCode, "");
+    strcpy(lobbyCodeInput, "");
+    lobbyCodeLen = 0;
+    isHost = false;
+    joinActive = false;
+    lobbyReady = false;
+    lastMouseX = lastMouseY = -1;
+    currentState = STATE_MAIN_MENU;
+    roundNumber = 0;
+    roundWins[0] = roundWins[1] = 0;
+    roundWinner = -1;
+    roundEndTimer = 0.0f;
+    asteroidSpawnTimer = 0.0f;
     roundTimer = ROUND_TIME;
     nextProjectileId = 0;
     nextAsteroidId = 0;
+    players[0].alive = false;
+    players[1].alive = false;
 
-    // Player 0
+    TTF_Init();
+    fontLarge = TTF_OpenFont("fonts/ShareTechMono-Regular.ttf", 96);
+    fontMedium = TTF_OpenFont("fonts/ShareTechMono-Regular.ttf", 56);
+    fontSmall = TTF_OpenFont("fonts/ShareTechMono-Regular.ttf", 36);
+}
+
+Game::~Game() {
+    gluDeleteQuadric(mQuadratic);
+
+    if (fontLarge)  TTF_CloseFont(fontLarge);
+    if (fontMedium) TTF_CloseFont(fontMedium);
+    if (fontSmall)  TTF_CloseFont(fontSmall);
+    TTF_Quit();
+}
+
+void Game::ResetRound() {
     players[0].id = 0;
-    players[0].x = -5.0f;  players[0].z = 0.0f;
+    players[0].x = -PLAYER_SPAWN_X;  players[0].z = 0.0f;
     players[0].rotation = 0.0f;
     players[0].vx = 0.0f;  players[0].vz = 0.0f;
     players[0].lives = PLAYER_START_LIVES;
-    players[0].x = -WORLD_SIZE * 0.7f;
-    players[0].z = 0.0f;
     players[0].score = 0;
     players[0].shootCooldown = 0.0f;
     players[0].invulnTime = 0.0f;
     players[0].alive = true;
 
-    // Player 1
     players[1].id = 1;
-    players[1].x = 5.0f;   players[1].z = 0.0f;
+    players[1].x = PLAYER_SPAWN_X;  players[1].z = 0.0f;
     players[1].rotation = 180.0f;
     players[1].vx = 0.0f;  players[1].vz = 0.0f;
     players[1].lives = PLAYER_START_LIVES;
-    players[1].x = WORLD_SIZE * 0.7f;
-    players[1].z = 0.0f;
     players[1].score = 0;
     players[1].shootCooldown = 0.0f;
     players[1].invulnTime = 0.0f;
     players[1].alive = true;
 
+    asteroids.clear();
+    projectiles.clear();
+    roundTimer = ROUND_TIME;
+    roundWinner = -1;
+    asteroidSpawnTimer = 0.0f;
+    nextProjectileId = 0;
+    nextAsteroidId = 0;
     SpawnInitialAsteroids();
+    roundNumber++;
 }
 
-Game::~Game() {
-    gluDeleteQuadric(mQuadratic);
+void Game::ResetMatch() {
+    roundWins[0] = roundWins[1] = 0;
+    roundNumber = 0;
+    ResetRound();
+
+}
+
+static void Begin2D(float w, float h) {
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix(); glLoadIdentity();
+    glOrtho(0, w, h, 0, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix(); glLoadIdentity();
+}
+
+static void End2D() {
+    glMatrixMode(GL_PROJECTION); glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);  glPopMatrix();
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+}
+
+static void DrawRect2D(float x, float y, float w, float h,
+    unsigned char r, unsigned char g, unsigned char b, unsigned char a = 255) {
+    glEnable(GL_BLEND);
+    glColor4ub(r, g, b, a);
+    glBegin(GL_QUADS);
+    glVertex2f(x, y);   glVertex2f(x + w, y);
+    glVertex2f(x + w, y + h); glVertex2f(x, y + h);
+    glEnd();
+    glDisable(GL_BLEND);
+}
+
+void Game::DrawText(const char* text, float x, float y, TTF_Font* font,
+    unsigned char r, unsigned char g, unsigned char b) {
+    if (!font) return;
+    SDL_Color color = { r, g, b, 255 };
+    SDL_Surface* surface = TTF_RenderText_Blended(font, text, color);
+    if (!surface) return;
+
+    GLuint texId;
+    glGenTextures(1, &texId);
+    glBindTexture(GL_TEXTURE_2D, texId);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    SDL_Surface* converted = SDL_CreateRGBSurface(0, surface->w, surface->h, 32,
+        0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+    SDL_BlitSurface(surface, NULL, converted, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, converted->w, converted->h,
+        0, GL_RGBA, GL_UNSIGNED_BYTE, converted->pixels);
+    SDL_FreeSurface(converted);
+
+    glEnable(GL_TEXTURE_2D);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glColor4ub(255, 255, 255, 255);
+
+    float w = (float)surface->w;
+    float h = (float)surface->h;
+    glBegin(GL_QUADS);
+    glTexCoord2f(0, 0); glVertex2f(x, y);
+    glTexCoord2f(1, 0); glVertex2f(x + w, y);
+    glTexCoord2f(1, 1); glVertex2f(x + w, y + h);
+    glTexCoord2f(0, 1); glVertex2f(x, y + h);
+    glEnd();
+
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_BLEND);
+    glDeleteTextures(1, &texId);
+    SDL_FreeSurface(surface);
+}
+
+void Game::SetState(GameStateEnum s) {
+    currentState = s;
+
+    if (s == STATE_MAIN_MENU) {
+        strcpy(lobbyCode, "");
+        strcpy(lobbyCodeInput, "");
+        lobbyCodeLen = 0;
+        isHost = false;
+        lobbyReady = false;
+        joinActive = false;
+        lobbyChoice = -1;
+
+        strcpy(nickname, "");
+        nicknameLen = 0;
+    }
+
+    if (s == STATE_ROUND_END || s == STATE_MATCH_END)
+        roundEndTimer = ROUND_END_PAUSE;
 }
 
 void Game::InitGFX() {
@@ -88,7 +217,7 @@ void Game::InitGFX() {
 void Game::ChangeSize(int w, int h) {
     mW = (float)w; mH = (float)h;
     glViewport(0, 0, (int)mW, (int)mH);
-    double fov = 40, nearX = .1, farX = 2500.;
+    double fov = 60, nearX = .1, farX = 2500.;
     double ratio = double(mW) / double(mH);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
@@ -96,16 +225,302 @@ void Game::ChangeSize(int w, int h) {
     glMatrixMode(GL_MODELVIEW);
 }
 
-void Game::Draw(void) {
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+void Game::DrawMainMenu() {
     glLoadIdentity();
-    gluLookAt(0, 75, 0.1, 0, 0, 0, 0, 1, 0);
+    Begin2D(mW, mH);
+    DrawRect2D(0, 0, mW, mH, 5, 5, 20);
+
+    // Title
+    const char* title = "ASTEROID 3D";
+    int tw, th;
+    TTF_SizeText(fontLarge, title, &tw, &th);
+    DrawText(title, (mW - tw) * 0.5f, mH * 0.1f, fontLarge, 255, 255, 255);
+
+    // Menu items
+    const char* items[] = { "PLAY", "RULES", "CREDITS", "QUIT" };
+    
+    for (int i = 0; i < 4; i++) {
+        float iy = mH * 0.35f + i * mH * 0.1f;
+        float bx = mW * 0.3f;
+        float bw = mW * 0.4f;
+        float bh = mH * 0.075f;
+
+        bool mouseMoved = (mMouseX != lastMouseX || mMouseY != lastMouseY);
+        bool hover = (mMouseX >= bx && mMouseX <= bx + bw &&
+            mMouseY >= iy && mMouseY <= iy + bh);
+        if (hover && mouseMoved) menuSelection = i;
+        bool sel = (menuSelection == i);
+
+        DrawRect2D(bx, iy, bw, bh,
+            sel ? 80 : 30, sel ? 120 : 60, sel ? 200 : 100);
+        int iw, ih;
+        TTF_SizeText(fontMedium, items[i], &iw, &ih);
+        DrawText(items[i], (mW - iw) * 0.5f, iy + (bh - ih) * 0.5f,
+            fontMedium, sel ? 255 : 150, sel ? 255 : 150, sel ? 255 : 150);
+    }
+
+    // Controls hint
+    const char* hint = "Mouse or Arrow keys to navigate  |  Click or ENTER to select";
+    int hw, hh;
+    TTF_SizeText(fontSmall, hint, &hw, &hh);
+    DrawText(hint, (mW - hw) * 0.5f, mH * 0.85f, fontSmall, 100, 100, 100);
+
+    lastMouseX = mMouseX;
+    lastMouseY = mMouseY;
+
+    End2D();
+    SDL_SetWindowTitle(gScreen, "ASTEROID 3D");
+}
+
+void Game::DrawNickname() {
+
+    glLoadIdentity();
+    Begin2D(mW, mH);
+    DrawRect2D(0, 0, mW, mH, 5, 5, 20);
+
+    // Title
+    const char* title = "ENTER NICKNAME";
+    int tw, th;
+    TTF_SizeText(fontLarge, title, &tw, &th);
+    DrawText(title, (mW - tw) * 0.5f, mH * 0.15f, fontLarge, 255, 255, 255);
+
+    // Input box
+    float bx = mW * 0.25f;
+    float by = mH * 0.4f;
+    float bw = mW * 0.5f;
+    float bh = mH * 0.1f;
+    DrawRect2D(bx, by, bw, bh, 20, 20, 50);
+    DrawRect2D(bx + 2, by + 2, bw - 4, bh - 4, 10, 10, 30);
+
+    // Nickname text with cursor
+    char display[64];
+    sprintf(display, "%s_", nickname);
+    int dw, dh;
+    TTF_SizeText(fontLarge, display, &dw, &dh);
+    DrawText(display, (mW - dw) * 0.5f, by + (bh - dh) * 0.5f, fontLarge, 0, 255, 255);
+
+    // Hint
+    const char* hint = "Type your name (max 15 chars) then press ENTER";
+    int hw, hh;
+    TTF_SizeText(fontSmall, hint, &hw, &hh);
+    DrawText(hint, (mW - hw) * 0.5f, mH * 0.6f, fontSmall, 100, 100, 100);
+
+    End2D();
+    SDL_SetWindowTitle(gScreen, "ASTEROID 3D - NICKNAME");
+}
+void Game::DrawRules() {
+    glLoadIdentity();
+    Begin2D(mW, mH);
+    DrawRect2D(0, 0, mW, mH, 5, 5, 20);
+    DrawRect2D(mW * 0.1f, mH * 0.08f, mW * 0.8f, mH * 0.84f, 15, 15, 40);
+
+    DrawText("RULES", (mW - 120) * 0.5f, mH * 0.12f, fontLarge, 255, 255, 255);
+
+    const char* lines[] = {
+        "Best of 3 rounds - 30 seconds each",
+        "Each player has 3 lives per round",
+        "Shoot asteroids for points",
+        "Shoot your enemy to take their lives",
+        "Kill enemy or have higher score to win round",
+        "First to 2 round wins takes the match",
+        "",
+        "W/A/D to move  SPACE to shoot",
+        
+    };
+    for (int i = 0; i < 8; i++) {
+        if (lines[i][0] == '\0') continue;
+        DrawText(lines[i], mW * 0.15f, mH * 0.25f + i * mH * 0.065f,
+            fontSmall, 180, 180, 180);
+    }
+
+    DrawText("ESC to go back", (mW - 160) * 0.5f, mH * 0.88f, fontSmall, 100, 100, 100);
+    End2D();
+    SDL_SetWindowTitle(gScreen, "ASTEROID 3D - RULES");
+}
+
+void Game::DrawCredits() {
+    glLoadIdentity();
+    Begin2D(mW, mH);
+    DrawRect2D(0, 0, mW, mH, 5, 5, 20);
+    DrawRect2D(mW * 0.1f, mH * 0.08f, mW * 0.8f, mH * 0.84f, 15, 15, 40);
+
+    DrawText("CREDITS", (mW - 160) * 0.5f, mH * 0.12f, fontLarge, 255, 255, 255);
+
+    DrawText("Okan Ozcan", mW * 0.12f, mH * 0.30f, fontMedium, 0, 255, 255);
+    DrawText("Marius-Raul Filipiuc", mW * 0.12f, mH * 0.35f, fontMedium, 0, 255, 255);
+
+    DrawText("Uppsala University - Campus Gotland", mW * 0.12f, mH * 0.42f, fontMedium, 180, 180, 180);
+    DrawText("Linear Algebra, Trigonometry and Geometry 2026 Spring", mW * 0.12f, mH * 0.49f, fontMedium, 180, 180, 180);
+
+    DrawText("ESC to go back", (mW - 160) * 0.5f, mH * 0.88f, fontSmall, 100, 100, 100);
+
+    End2D();
+    SDL_SetWindowTitle(gScreen, "ASTEROID 3D - CREDITS");
+}
+
+void Game::DrawLobby() {
+    glLoadIdentity();
+    Begin2D(mW, mH);
+    DrawRect2D(0, 0, mW, mH, 5, 5, 20);
+
+    // Player name
+    char welcome[64];
+    sprintf(welcome, "Welcome, %s", player1Name);
+    int ww, wh;
+    TTF_SizeText(fontMedium, welcome, &ww, &wh);
+    DrawText(welcome, (mW - ww) * 0.5f, mH * 0.05f, fontMedium, 0, 255, 255);
+
+    // HOST button
+    float bx = mW * 0.25f;
+    float bw = mW * 0.5f;
+    float bh = mH * 0.08f;
+    bool mouseMoved = (mMouseX != lastMouseX || mMouseY != lastMouseY);
+    float hostY = mH * 0.2f;
+    float joinY = mH * 0.32f;
+    bool hoverHost = (mMouseX >= bx && mMouseX <= bx + bw &&
+        mMouseY >= hostY && mMouseY <= hostY + bh);
+    bool hoverJoin = (mMouseX >= bx && mMouseX <= bx + bw &&
+        mMouseY >= joinY && mMouseY <= joinY + bh);
+    bool selHost = hoverHost || (!hoverJoin && lobbyChoice == 0);
+    DrawRect2D(bx, hostY, bw, bh, selHost ? 80 : 30, selHost ? 120 : 60, selHost ? 200 : 100);
+    const char* hostTxt = "HOST GAME";
+    int htw, hth;
+    TTF_SizeText(fontMedium, hostTxt, &htw, &hth);
+    DrawText(hostTxt, (mW - htw) * 0.5f, hostY + (bh - hth) * 0.5f,
+        fontMedium, selHost ? 255 : 150, selHost ? 255 : 150, selHost ? 255 : 150);
+
+    // JOIN button
+    bool selJoin = hoverJoin || (!hoverHost && lobbyChoice == 1);
+    DrawRect2D(bx, joinY, bw, bh, selJoin ? 80 : 30, selJoin ? 120 : 60, selJoin ? 200 : 100);
+    const char* joinTxt = "JOIN GAME";
+    int jtw, jth;
+    TTF_SizeText(fontMedium, joinTxt, &jtw, &jth);
+    DrawText(joinTxt, (mW - jtw) * 0.5f, joinY + (bh - jth) * 0.5f,
+        fontMedium, selJoin ? 255 : 150, selJoin ? 255 : 150, selJoin ? 255 : 150);
+
+    // If HOST selected and code generated
+    if (isHost && lobbyCode[0] != '\0') {
+        const char* waitTxt = "LOBBY CODE:";
+        int wtw, wth;
+        TTF_SizeText(fontMedium, waitTxt, &wtw, &wth);
+        DrawText(waitTxt, (mW - wtw) * 0.5f, mH * 0.5f, fontMedium, 200, 200, 200);
+
+        int cw, ch;
+        TTF_SizeText(fontLarge, lobbyCode, &cw, &ch);
+        DrawText(lobbyCode, (mW - cw) * 0.5f, mH * 0.58f, fontLarge, 255, 255, 0);
+
+        const char* wait2 = "Waiting for opponent...";
+        int w2w, w2h;
+        TTF_SizeText(fontSmall, wait2, &w2w, &w2h);
+        DrawText(wait2, (mW - w2w) * 0.5f, mH * 0.72f, fontSmall, 100, 100, 100);
+    }
+
+    // If JOIN selected, show code input
+    if (joinActive && !isHost) {
+        const char* enterCode = "ENTER LOBBY CODE:";
+        int etw, eth;
+        TTF_SizeText(fontMedium, enterCode, &etw, &eth);
+        DrawText(enterCode, (mW - etw) * 0.5f, mH * 0.5f, fontMedium, 200, 200, 200);
+
+        // Code input box
+        float cbx = mW * 0.3f;
+        float cby = mH * 0.58f;
+        float cbw = mW * 0.4f;
+        float cbh = mH * 0.1f;
+        DrawRect2D(cbx, cby, cbw, cbh, 20, 20, 50);
+        DrawRect2D(cbx + 2, cby + 2, cbw - 4, cbh - 4, 10, 10, 30);
+
+        char codeDisp[16];
+        sprintf(codeDisp, "%s_", lobbyCodeInput);
+        int cdw, cdh;
+        TTF_SizeText(fontLarge, codeDisp, &cdw, &cdh);
+        DrawText(codeDisp, (mW - cdw) * 0.5f, cby + (cbh - cdh) * 0.5f, fontLarge, 255, 255, 0);
+
+        const char* codeHint = "6 character code, then press ENTER";
+        int chw, chh;
+        TTF_SizeText(fontSmall, codeHint, &chw, &chh);
+        DrawText(codeHint, (mW - chw) * 0.5f, mH * 0.72f, fontSmall, 100, 100, 100);
+    }
+
+    // ESC hint
+    const char* escHint = "ESC to go back";
+    int ew, eh;
+    TTF_SizeText(fontSmall, escHint, &ew, &eh);
+    DrawText(escHint, (mW - ew) * 0.5f, mH * 0.9f, fontSmall, 100, 100, 100);
+
+
+
+    End2D();
+    SDL_SetWindowTitle(gScreen, "ASTEROID 3D - LOBBY");
+}
+
+void Game::DrawRoundEnd() {
+    DrawGame();
+    Begin2D(mW, mH);
+    DrawRect2D(mW * 0.2f, mH * 0.25f, mW * 0.6f, mH * 0.4f, 10, 10, 50, 200);
+
+    char msg[128];
+    if (roundWinner == -1)
+        sprintf(msg, "DRAW!");
+    else
+        sprintf(msg, "P%d WINS THE ROUND!", roundWinner + 1);
+    int tw, th;
+    TTF_SizeText(fontLarge, msg, &tw, &th);
+    DrawText(msg, (mW - tw) * 0.5f, mH * 0.32f, fontLarge,
+        roundWinner == 0 ? 0 : 255, roundWinner == 0 ? 255 : 50, roundWinner == 0 ? 255 : 50);
+
+    char score[64];
+    sprintf(score, "Wins: %d - %d", roundWins[0], roundWins[1]);
+    TTF_SizeText(fontMedium, score, &tw, &th);
+    DrawText(score, (mW - tw) * 0.5f, mH * 0.45f, fontMedium, 200, 200, 200);
+
+    char next[32];
+    sprintf(next, "Next round in %.0fs...", roundEndTimer);
+    TTF_SizeText(fontSmall, next, &tw, &th);
+    DrawText(next, (mW - tw) * 0.5f, mH * 0.55f, fontSmall, 150, 150, 150);
+
+    End2D();
+    SDL_SetWindowTitle(gScreen, "ASTEROID 3D");
+}
+
+void Game::DrawMatchEnd() {
+    DrawGame();
+    Begin2D(mW, mH);
+    DrawRect2D(mW * 0.15f, mH * 0.2f, mW * 0.7f, mH * 0.5f, 10, 10, 50, 220);
+
+    int winner = (roundWins[0] >= ROUNDS_TO_WIN) ? 1 : 2;
+    char msg[128];
+    sprintf(msg, "P%d WINS THE MATCH!", winner);
+    int tw, th;
+    TTF_SizeText(fontLarge, msg, &tw, &th);
+    unsigned char cr = (winner == 1) ? 0 : 255;
+    unsigned char cg = (winner == 1) ? 255 : 50;
+    unsigned char cb = (winner == 1) ? 255 : 50;
+    DrawText(msg, (mW - tw) * 0.5f, mH * 0.28f, fontLarge, cr, cg, cb);
+
+    char score[64];
+    sprintf(score, "Final: %d - %d", roundWins[0], roundWins[1]);
+    TTF_SizeText(fontMedium, score, &tw, &th);
+    DrawText(score, (mW - tw) * 0.5f, mH * 0.42f, fontMedium, 200, 200, 200);
+
+    char back[64];
+    sprintf(back, "Returning to menu in %.0fs...", roundEndTimer);
+    TTF_SizeText(fontSmall, back, &tw, &th);
+    DrawText(back, (mW - tw) * 0.5f, mH * 0.55f, fontSmall, 150, 150, 150);
+
+    End2D();
+    SDL_SetWindowTitle(gScreen, "ASTEROID 3D");
+}
+
+void Game::DrawGame() {
+    glLoadIdentity();
+    gluLookAt(0, 65, 0.1, 0, 0, 0, 0, 1, 0);
 
     // Grid
     glLineWidth(1);
-    glColor3ub(40, 40, 40);
+    glColor3ub(20, 20, 20); // for color 
     int n = (int)WORLD_SIZE;
-    for (int i = -n; i <= n; i += 5) {
+    for (int i = -n; i <= n; i += 10) {
         glBegin(GL_LINES);
         glVertex3f((float)-n, 0, (float)i);
         glVertex3f((float)n, 0, (float)i);
@@ -114,27 +529,18 @@ void Game::Draw(void) {
         glEnd();
     }
 
-    // World border
-    glColor3ub(80, 80, 80);
-    glLineWidth(2);
-    glBegin(GL_LINE_LOOP);
-    glVertex3f(-WORLD_SIZE, 0.1f, -WORLD_SIZE);
-    glVertex3f(WORLD_SIZE, 0.1f, -WORLD_SIZE);
-    glVertex3f(WORLD_SIZE, 0.1f, WORLD_SIZE);
-    glVertex3f(-WORLD_SIZE, 0.1f, WORLD_SIZE);
-    glEnd();
-    glLineWidth(1);
+
 
     // Player 0
     bool vis0 = true;
     if (players[0].invulnTime > 0.0f)
-        vis0 = ((int)(players[0].invulnTime * 10) % 2 == 0);
+        vis0 = ((int)(players[0].invulnTime / PLAYER_FLASH_RATE) % 2 == 0);
     if (players[0].alive && vis0) {
-        glColor3ub(0, 255, 128);
+        glColor3ub(0, 255, 255);
         glPushMatrix();
         glTranslatef(players[0].x, 0.3f, players[0].z);
         glRotatef(players[0].rotation, 0, 1, 0);
-        glScalef(2.0f, 2.0f, 2.0f);
+        glScalef(3.0f, 3.0f, 3.0f);
         glBegin(GL_TRIANGLES);
         glVertex3f(1.0f, 0.0f, 0.0f);
         glVertex3f(-0.5f, 0.0f, 0.6f);
@@ -145,7 +551,7 @@ void Game::Draw(void) {
         glVertex3f(-0.5f, 0.2f, -0.6f);
         glVertex3f(-0.5f, 0.2f, 0.6f);
         glEnd();
-        glColor3ub(0, 200, 100);
+        glColor3ub(0, 200, 200);
         glBegin(GL_QUADS);
         glVertex3f(1.0f, 0.0f, 0.0f); glVertex3f(1.0f, 0.2f, 0.0f);
         glVertex3f(-0.5f, 0.2f, 0.6f); glVertex3f(-0.5f, 0.0f, 0.6f);
@@ -160,13 +566,13 @@ void Game::Draw(void) {
     // Player 1
     bool vis1 = true;
     if (players[1].invulnTime > 0.0f)
-        vis1 = ((int)(players[1].invulnTime * 10) % 2 == 0);
+        vis1 = ((int)(players[1].invulnTime / PLAYER_FLASH_RATE) % 2 == 0);
     if (players[1].alive && vis1) {
-        glColor3ub(255, 100, 50);
+        glColor3ub(255, 50, 50);
         glPushMatrix();
         glTranslatef(players[1].x, 0.3f, players[1].z);
         glRotatef(players[1].rotation, 0, 1, 0);
-        glScalef(2.0f, 2.0f, 2.0f);
+        glScalef(3.0f, 3.0f, 3.0f);
         glBegin(GL_TRIANGLES);
         glVertex3f(1.0f, 0.0f, 0.0f);
         glVertex3f(-0.5f, 0.0f, 0.6f);
@@ -177,7 +583,7 @@ void Game::Draw(void) {
         glVertex3f(-0.5f, 0.2f, -0.6f);
         glVertex3f(-0.5f, 0.2f, 0.6f);
         glEnd();
-        glColor3ub(200, 80, 40);
+        glColor3ub(200, 40, 40);
         glBegin(GL_QUADS);
         glVertex3f(1.0f, 0.0f, 0.0f); glVertex3f(1.0f, 0.2f, 0.0f);
         glVertex3f(-0.5f, 0.2f, 0.6f); glVertex3f(-0.5f, 0.0f, 0.6f);
@@ -200,9 +606,15 @@ void Game::Draw(void) {
 
     // Asteroids
     for (int i = 0; i < (int)asteroids.size(); i++) {
+
         Asteroid& a = asteroids[i];
-        if (a.isLarge) glColor3ub(160, 120, 80);
-        else glColor3ub(130, 100, 70);
+
+        if (a.size == 0)      glColor3ub(100, 100, 100);
+
+        else if (a.size == 1) glColor3ub(80, 80, 80);
+
+        else                  glColor3ub(60, 60, 60);
+
         glPushMatrix();
         glTranslatef(a.x, 0.5f, a.z);
         glRotatef(a.rotation, 0.3f, 1.0f, 0.2f);
@@ -219,7 +631,7 @@ void Game::Draw(void) {
 
         // Wireframe outline
         glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-        glColor3ub(220, 200, 160);
+        glColor3ub(200, 200, 200);
         glLineWidth(2);
         glBegin(GL_QUADS);
         glVertex3f(-1, -1, -1); glVertex3f(1, -1, -1); glVertex3f(1, -1, 1); glVertex3f(-1, -1, 1);
@@ -236,47 +648,250 @@ void Game::Draw(void) {
     }
 
     // HUD
-    char title[256];
-    sprintf(title, "P1 Score:%d Lives:%d | P2 Score:%d Lives:%d | Time:%.0f",
-        players[0].score, players[0].lives,
-        players[1].score, players[1].lives, roundTimer);
-    SDL_SetWindowTitle(gScreen, title);
+    Begin2D(mW, mH);
 
+    // Center dashed line
+    glColor3ub(50, 50, 50);
+    glLineWidth(2);
+    float dashLen = mH * 0.02f;
+    float gapLen = mH * 0.015f;
+    float centerX = mW * 0.5f;
+    float yy = 0.0f;
+    glBegin(GL_LINES);
+    while (yy < mH) {
+        glVertex2f(centerX, yy);
+        glVertex2f(centerX, yy + dashLen);
+        yy += dashLen + gapLen;
+    }
+    glEnd();
+    glLineWidth(1);
+
+    float hs = 16;
+    float margin = 20;
+
+    // ===== TOP LEFT - Player 1 Name =====
+    DrawText(player1Name, margin, margin, fontMedium, 0, 255, 255);
+
+    // ===== TOP RIGHT - Player 2 Name =====
+    int nw2, nh2;
+    TTF_SizeText(fontMedium, player2Name, &nw2, &nh2);
+    DrawText(player2Name, mW - nw2 - margin, margin, fontMedium, 255, 50, 50);
+
+    // ===== LEFT SIDE - Score + Lives =====
+    float leftY = mH * 0.4f;
+
+    // Score label
+    DrawText("SCORE", margin, leftY, fontSmall, 100, 100, 100);
+
+    // Score number
+    char s1[32];
+    sprintf(s1, "%d", players[0].score);
+    DrawText(s1, margin, leftY + 42, fontLarge, 0, 255, 255);
+
+    // Lives label
+    DrawText("LIVES", margin, leftY + 145, fontSmall, 100, 100, 100);
+
+    // P1 hearts
+    float hy1 = leftY + 190;
+    for (int i = 0; i < PLAYER_START_LIVES; i++) {
+        if (i < players[0].lives)
+            glColor3ub(0, 255, 255);
+        else
+            glColor3ub(40, 40, 40);
+        float cx2 = margin + i * (hs * 2.5f) + hs;
+        float cy2 = hy1 + hs;
+        glBegin(GL_TRIANGLE_FAN);
+        glVertex2f(cx2, cy2 + hs * 0.9f);
+        for (int a = 0; a <= 20; a++) {
+            float angle = (float)a / 20.0f * 3.14159f;
+            glVertex2f(cx2 - hs * 0.5f - hs * 0.5f * cosf(angle),
+                cy2 - hs * 0.5f * sinf(angle));
+        }
+        glEnd();
+        glBegin(GL_TRIANGLE_FAN);
+        glVertex2f(cx2, cy2 + hs * 0.9f);
+        for (int a = 0; a <= 20; a++) {
+            float angle = (float)a / 20.0f * 3.14159f;
+            glVertex2f(cx2 + hs * 0.5f + hs * 0.5f * cosf(angle),
+                cy2 - hs * 0.5f * sinf(angle));
+        }
+        glEnd();
+    }
+
+    // ===== RIGHT SIDE - Score + Lives =====
+    // Score label
+    int sw, sh;
+    TTF_SizeText(fontSmall, "SCORE", &sw, &sh);
+    DrawText("SCORE", mW - sw - margin, leftY, fontSmall, 100, 100, 100);
+
+    // Score number
+    char s2[32];
+    sprintf(s2, "%d", players[1].score);
+    int s2w, s2h;
+    TTF_SizeText(fontLarge, s2, &s2w, &s2h);
+    DrawText(s2, mW - s2w - margin, leftY + 42, fontLarge, 255, 50, 50);
+
+    // Lives label
+    int lw, lh;
+    TTF_SizeText(fontSmall, "LIVES", &lw, &lh);
+    DrawText("LIVES", mW - lw - margin, leftY + 145, fontSmall, 100, 100, 100);
+
+    // P2 hearts
+    for (int i = 0; i < PLAYER_START_LIVES; i++) {
+        if (i < players[1].lives)
+            glColor3ub(255, 50, 50);
+        else
+            glColor3ub(40, 40, 40);
+        float rx = mW - margin - PLAYER_START_LIVES * (hs * 2.5f);
+        float cx2 = rx + i * (hs * 2.5f) + hs;
+        float cy2 = hy1 + hs;
+        glBegin(GL_TRIANGLE_FAN);
+        glVertex2f(cx2, cy2 + hs * 0.9f);
+        for (int a = 0; a <= 20; a++) {
+            float angle = (float)a / 20.0f * 3.14159f;
+            glVertex2f(cx2 - hs * 0.5f - hs * 0.5f * cosf(angle),
+                cy2 - hs * 0.5f * sinf(angle));
+        }
+        glEnd();
+        glBegin(GL_TRIANGLE_FAN);
+        glVertex2f(cx2, cy2 + hs * 0.9f);
+        for (int a = 0; a <= 20; a++) {
+            float angle = (float)a / 20.0f * 3.14159f;
+            glVertex2f(cx2 + hs * 0.5f + hs * 0.5f * cosf(angle),
+                cy2 - hs * 0.5f * sinf(angle));
+        }
+        glEnd();
+    }
+
+    // ===== CENTER - Timer + Round =====
+    char timerStr[32];
+    sprintf(timerStr, "%.0f", roundTimer);
+    int tw3, th3;
+    TTF_SizeText(fontLarge, timerStr, &tw3, &th3);
+    DrawText(timerStr, (mW - tw3) * 0.5f, 10, fontLarge, 200, 200, 200);
+
+    char rndStr[64];
+    sprintf(rndStr, "Round %d  [%d-%d]", roundNumber, roundWins[0], roundWins[1]);
+    int rw, rh;
+    TTF_SizeText(fontSmall, rndStr, &rw, &rh);
+    DrawText(rndStr, (mW - rw) * 0.5f, 110, fontSmall, 150, 150, 150);
+
+    End2D();
+    SDL_SetWindowTitle(gScreen, "ASTEROID 3D");
+}
+
+void Game::Draw() {
+
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    switch (currentState) {
+    case STATE_MAIN_MENU: DrawMainMenu(); break;
+    case STATE_RULES:     DrawRules();    break;
+    case STATE_CREDITS:   DrawCredits();  break;
+    case STATE_NICKNAME:  DrawNickname(); break;
+    case STATE_LOBBY:     DrawLobby();    break;
+    case STATE_PLAYING:   DrawGame();     break;
+    case STATE_ROUND_END: DrawRoundEnd(); break;
+    case STATE_MATCH_END: DrawMatchEnd(); break;
+    }
     mCounter++;
 }
 
 void Game::NormalKeys(unsigned char key, int state) {}
-void Game::SpecialKeys(int key, int state) {}
+
+void Game::SpecialKeys(int key, int state) {
+
+    if (currentState == STATE_MAIN_MENU) {
+        if (key == SDLK_UP)   menuSelection = (menuSelection + 3) % 4;
+        if (key == SDLK_DOWN) menuSelection = (menuSelection + 1) % 4;
+        if (key == SDLK_RETURN || key == SDLK_KP_ENTER) {
+            switch (menuSelection) {
+            case 0: SetState(STATE_NICKNAME); enteringNickname = true; nicknameLen = (int)strlen(nickname); break;
+            case 1: SetState(STATE_RULES);   break;
+            case 2: SetState(STATE_CREDITS); break;
+            case 3: {
+                SDL_Event q;
+                q.type = SDL_QUIT;
+                SDL_PushEvent(&q);
+            } break;
+            }
+        }
+    }
+    else if (currentState == STATE_RULES || currentState == STATE_CREDITS) {
+        if (key == SDLK_ESCAPE) SetState(STATE_MAIN_MENU);
+    }
+}
 void Game::Mouse(int button, int state, int x, int y) {
     mMouseButton = button; mMouseState = state;
     mMouseX = x; mMouseY = y;
+
+    if (currentState == STATE_MAIN_MENU && button == SDL_BUTTON_LEFT && state == SDL_RELEASED) {
+        float bx = mW * 0.3f;
+        float bw = mW * 0.4f;
+        for (int i = 0; i < 4; i++) {
+            float iy = mH * 0.35f + i * mH * 0.1f;
+            float bh = mH * 0.075f;
+            if (x >= bx && x <= bx + bw && y >= iy && y <= iy + bh) {
+                switch (i) {
+                case 0: SetState(STATE_NICKNAME); enteringNickname = true; nicknameLen = (int)strlen(nickname); break;
+                case 1: SetState(STATE_RULES); break;
+                case 2: SetState(STATE_CREDITS); break;
+                case 3: {
+                    SDL_Event q;
+                    q.type = SDL_QUIT;
+                    SDL_PushEvent(&q);
+                } break;
+                }
+                break;
+            }
+        }
+    }
+
+    if (currentState == STATE_LOBBY && button == SDL_BUTTON_LEFT && state == SDL_RELEASED) {
+        float bx = mW * 0.25f;
+        float bw = mW * 0.5f;
+        float bh = mH * 0.08f;
+        float hostY = mH * 0.2f;
+        float joinY = mH * 0.32f;
+
+        if (x >= bx && x <= bx + bw && y >= hostY && y <= hostY + bh) {
+            lobbyChoice = 0;
+            joinActive = false;
+            if (lobbyCode[0] == '\0') {
+                isHost = true;
+                sprintf(lobbyCode, "%c%c%c%c%c%c",
+                    'A' + rand() % 26, 'A' + rand() % 26, 'A' + rand() % 26,
+                    '0' + rand() % 10, '0' + rand() % 10, '0' + rand() % 10);
+                lobbyReady = false;
+            }
+        }
+        if (x >= bx && x <= bx + bw && y >= joinY && y <= joinY + bh) {
+            lobbyChoice = 1;
+            isHost = false;
+            strcpy(lobbyCode, "");
+            joinActive = true;
+        }
+    }
 }
+
 void Game::MouseMotion(int x, int y) {
     mMouseMotionX = x; mMouseMotionY = y;
+    mMouseX = x; mMouseY = y;
 }
 
 void Game::UpdatePlayer(int id, float dt) {
     Player& p = players[id];
     if (!p.alive) return;
 
-    bool kLeft, kRight, kThrust, kShoot;
-    if (id == 0) {
-        kLeft = keys['a']; kRight = keys['d'];
-        kThrust = keys['w']; kShoot = keys[' '];
-    }
-    else {
-        kLeft = keys['j']; kRight = keys['l'];
-        kThrust = keys['i']; kShoot = keys['k'];
-    }
+    InputState inp = BuildInputState(id);
 
-    if (kLeft)  p.rotation += PLAYER_ROTATION_SPEED * dt;
-    if (kRight) p.rotation -= PLAYER_ROTATION_SPEED * dt;
+    if (inp.rotateLeft)  p.rotation += PLAYER_ROTATION_SPEED * dt;
+    if (inp.rotateRight) p.rotation -= PLAYER_ROTATION_SPEED * dt;
 
     float rad = p.rotation * (float)M_PI / 180.0f;
     float dirX = cosf(rad);
     float dirZ = -sinf(rad);
 
-    if (kThrust) {
+    if (inp.thrustForward) {
         p.vx += dirX * PLAYER_ACCELERATION * dt;
         p.vz += dirZ * PLAYER_ACCELERATION * dt;
     }
@@ -300,20 +915,19 @@ void Game::UpdatePlayer(int id, float dt) {
 
     p.shootCooldown -= dt;
     if (p.shootCooldown < 0.0f) p.shootCooldown = 0.0f;
-    if (kShoot) SpawnProjectile(id);
+    if (inp.shoot) SpawnProjectile(id);
 
     p.invulnTime -= dt;
     if (p.invulnTime < 0.0f) p.invulnTime = 0.0f;
 }
 
-void Game::Update(float dt) {
-    deltatime = dt;
+void Game::UpdatePlaying(float dt) {
     if (dt <= 0.0f || dt > 0.1f) return;
 
     UpdatePlayer(0, dt);
     UpdatePlayer(1, dt);
 
-    // Projectiles
+    // Projectile movement
     for (int i = 0; i < (int)projectiles.size(); i++) {
         Projectile& pr = projectiles[i];
         pr.x += pr.vx * dt;
@@ -325,7 +939,7 @@ void Game::Update(float dt) {
         }
     }
 
-    // Asteroids
+    // Asteroid movement
     for (int i = 0; i < (int)asteroids.size(); i++) {
         Asteroid& a = asteroids[i];
         a.x += a.vx * dt;
@@ -337,15 +951,20 @@ void Game::Update(float dt) {
         if (a.z < -WORLD_SIZE) a.z += 2 * WORLD_SIZE;
     }
 
-    // Respawn
-    if ((int)asteroids.size() < ASTEROID_MIN_COUNT) {
-        float x, z;
-        int edge = rand() % 4;
-        if (edge == 0) { x = -WORLD_SIZE; z = (float)(rand() % (int)(2 * WORLD_SIZE)) - WORLD_SIZE; }
-        else if (edge == 1) { x = WORLD_SIZE;  z = (float)(rand() % (int)(2 * WORLD_SIZE)) - WORLD_SIZE; }
-        else if (edge == 2) { x = (float)(rand() % (int)(2 * WORLD_SIZE)) - WORLD_SIZE; z = -WORLD_SIZE; }
-        else { x = (float)(rand() % (int)(2 * WORLD_SIZE)) - WORLD_SIZE; z = WORLD_SIZE; }
-        SpawnAsteroid(true, x, z);
+    // Asteroid respawn (timer based)
+    asteroidSpawnTimer += dt;
+    if (asteroidSpawnTimer >= ASTEROID_SPAWN_INTERVAL) {
+        asteroidSpawnTimer = 0.0f;
+        if ((int)asteroids.size() < ASTEROID_MIN_COUNT &&
+            (int)asteroids.size() < ASTEROID_MAX_COUNT) {
+            float x, z;
+            int edge = rand() % 4;
+            if (edge == 0) { x = -WORLD_SIZE; z = (float)(rand() % (int)(2 * WORLD_SIZE)) - WORLD_SIZE; }
+            else if (edge == 1) { x = WORLD_SIZE; z = (float)(rand() % (int)(2 * WORLD_SIZE)) - WORLD_SIZE; }
+            else if (edge == 2) { x = (float)(rand() % (int)(2 * WORLD_SIZE)) - WORLD_SIZE; z = -WORLD_SIZE; }
+            else { x = (float)(rand() % (int)(2 * WORLD_SIZE)) - WORLD_SIZE; z = WORLD_SIZE; }
+            SpawnAsteroidBySize(0, x, z);
+        }
     }
 
     // Projectile vs Asteroid
@@ -355,16 +974,23 @@ void Game::Update(float dt) {
             Asteroid& a = asteroids[j];
             float dx = pr.x - a.x, dz = pr.z - a.z;
             float dist = sqrtf(dx * dx + dz * dz);
-            if (dist < a.radius * 1.3f + PROJECTILE_RADIUS) {
-                
-                players[pr.ownerId].score += a.isLarge ? SCORE_LARGE_SPLIT : SCORE_SMALL_DESTROY;
-                if (a.isLarge) {
+            if (dist < a.radius * 1.5f + PROJECTILE_RADIUS) {
+                if (a.size == 0) {
+                    players[pr.ownerId].score += SCORE_BIG_SPLIT;
                     float ax = a.x, az = a.z;
                     asteroids.erase(asteroids.begin() + j);
-                    SpawnAsteroid(false, ax, az);
-                    SpawnAsteroid(false, ax, az);
+                    SpawnAsteroidBySize(1, ax, az);
+                    SpawnAsteroidBySize(1, ax, az);
+                }
+                else if (a.size == 1) {
+                    players[pr.ownerId].score += SCORE_MID_SPLIT;
+                    float ax = a.x, az = a.z;
+                    asteroids.erase(asteroids.begin() + j);
+                    SpawnAsteroidBySize(2, ax, az);
+                    SpawnAsteroidBySize(2, ax, az);
                 }
                 else {
+                    players[pr.ownerId].score += SCORE_SMALL_DESTROY;
                     asteroids.erase(asteroids.begin() + j);
                 }
                 projectiles.erase(projectiles.begin() + i);
@@ -400,8 +1026,7 @@ void Game::Update(float dt) {
             Player& pl = players[pid];
             if (!pl.alive || pl.invulnTime > 0.0f) continue;
             float dx = pl.x - a.x, dz = pl.z - a.z;
-            if (sqrtf(dx * dx + dz * dz) < a.radius * 1.3f + PLAYER_RADIUS) {
-            
+            if (sqrtf(dx * dx + dz * dz) < a.radius * 1.5f + PLAYER_RADIUS) {
                 pl.lives--;
                 pl.invulnTime = PLAYER_INVULN_TIME;
                 if (pl.lives <= 0) pl.alive = false;
@@ -427,6 +1052,85 @@ void Game::Update(float dt) {
     // Timer
     roundTimer -= dt;
     if (roundTimer < 0.0f) roundTimer = 0.0f;
+
+    CheckRoundEnd();
+
+}
+
+void Game::CheckRoundEnd() {
+    bool p0Dead = !players[0].alive;
+    bool p1Dead = !players[1].alive;
+
+    if (p0Dead || p1Dead) {
+        if (p0Dead && p1Dead) roundWinner = -1;
+        else if (p1Dead) { roundWinner = 0; roundWins[0]++; }
+        else { roundWinner = 1; roundWins[1]++; }
+
+        if (roundWins[0] >= ROUNDS_TO_WIN || roundWins[1] >= ROUNDS_TO_WIN)
+            SetState(STATE_MATCH_END);
+        else
+            SetState(STATE_ROUND_END);
+        return;
+    }
+
+    if (roundTimer <= 0.0f) {
+        if (players[0].score > players[1].score) { roundWinner = 0; roundWins[0]++; }
+        else if (players[1].score > players[0].score) { roundWinner = 1; roundWins[1]++; }
+        else { roundWinner = -1; }
+
+        if (roundWins[0] >= ROUNDS_TO_WIN || roundWins[1] >= ROUNDS_TO_WIN)
+            SetState(STATE_MATCH_END);
+        else
+            SetState(STATE_ROUND_END);
+    }
+}
+
+void Game::UpdateRoundEnd(float dt) {
+    roundEndTimer -= dt;
+    if (roundEndTimer <= 0.0f) {
+        if (currentState == STATE_MATCH_END) {
+            SetState(STATE_MAIN_MENU);
+        }
+        else {
+            ResetRound();
+            SetState(STATE_PLAYING);
+        }
+    }
+}
+
+InputState Game::BuildInputState(int id) {
+    InputState inp;
+    inp.playerId = id;
+    if (id == 0) {
+        inp.rotateLeft = keys['a'];
+        inp.rotateRight = keys['d'];
+        inp.thrustForward = keys['w'];
+        inp.shoot = keys[' '];
+    }
+    else {
+        inp.rotateLeft = keys['j'];
+        inp.rotateRight = keys['l'];
+        inp.thrustForward = keys['i'];
+        inp.shoot = keys['k'];
+    }
+    return inp;
+}
+
+void Game::Update(float dt) {
+    switch (currentState) {
+    case STATE_MAIN_MENU:
+    case STATE_RULES:
+    case STATE_CREDITS:
+    case STATE_LOBBY:
+        break;
+    case STATE_PLAYING:
+        UpdatePlaying(dt);
+        break;
+    case STATE_ROUND_END:
+    case STATE_MATCH_END:
+        UpdateRoundEnd(dt);
+        break;
+    }
 }
 
 void Game::SpawnProjectile(int playerId) {
@@ -446,14 +1150,43 @@ void Game::SpawnProjectile(int playerId) {
 }
 
 void Game::SpawnAsteroid(bool isLarge, float x, float z) {
+    if ((int)asteroids.size() >= ASTEROID_MAX_COUNT) return;
     Asteroid a;
     a.id = nextAsteroidId++;
     a.x = x; a.z = z;
-    a.isLarge = isLarge;
-    a.radius = isLarge ? ASTEROID_LARGE_RADIUS : ASTEROID_SMALL_RADIUS;
+    if (isLarge) {
+        a.size = 0;
+        a.radius = ASTEROID_BIG_RADIUS;
+    }
+    else {
+        a.size = 2;
+        a.radius = ASTEROID_SMALL_RADIUS;
+    }
     a.radius *= 0.95f + (rand() % 11) / 100.0f;
     float angle = (rand() % 360) * (float)M_PI / 180.0f;
-    float spd = isLarge ? ASTEROID_LARGE_SPEED : ASTEROID_SMALL_SPEED;
+    float spd = (a.size == 0) ? ASTEROID_BIG_SPEED : ASTEROID_SMALL_SPEED;
+    a.vx = cosf(angle) * spd;
+    a.vz = sinf(angle) * spd;
+    a.rotation = (float)(rand() % 360);
+    a.rotationspeed = 30.0f + (float)(rand() % 90);
+    asteroids.push_back(a);
+}
+
+void Game::SpawnAsteroidBySize(int size, float x, float z) {
+    if ((int)asteroids.size() >= ASTEROID_MAX_COUNT) return;
+    Asteroid a;
+    a.id = nextAsteroidId++;
+    a.x = x; a.z = z;
+    a.size = size;
+    if (size == 0)      a.radius = ASTEROID_BIG_RADIUS;
+    else if (size == 1) a.radius = ASTEROID_MID_RADIUS;
+    else                a.radius = ASTEROID_SMALL_RADIUS;
+    a.radius *= 0.95f + (rand() % 11) / 100.0f;
+    float angle = (rand() % 360) * (float)M_PI / 180.0f;
+    float spd;
+    if (size == 0)      spd = ASTEROID_BIG_SPEED;
+    else if (size == 1) spd = ASTEROID_MID_SPEED;
+    else                spd = ASTEROID_SMALL_SPEED;
     a.vx = cosf(angle) * spd;
     a.vz = sinf(angle) * spd;
     a.rotation = (float)(rand() % 360);
@@ -464,8 +1197,48 @@ void Game::SpawnAsteroid(bool isLarge, float x, float z) {
 void Game::SpawnInitialAsteroids() {
     asteroids.clear();
     for (int i = 0; i < ASTEROID_INITIAL_COUNT; i++) {
-        float x = -10.0f + (rand() % 200) / 10.0f;
-        float z = -10.0f + (rand() % 200) / 10.0f;
-        SpawnAsteroid(true, x, z);
+        float x, z;
+        int attempts = 0;
+        bool valid;
+        do {
+            x = ((rand() % ((int)(ASTEROID_CENTER_ZONE * 20))) / 10.0f) - ASTEROID_CENTER_ZONE;
+            z = ((rand() % ((int)(ASTEROID_CENTER_ZONE * 20))) / 10.0f) - ASTEROID_CENTER_ZONE;
+            valid = true;
+            float d0 = sqrtf((x - players[0].x) * (x - players[0].x) + (z - players[0].z) * (z - players[0].z));
+            float d1 = sqrtf((x - players[1].x) * (x - players[1].x) + (z - players[1].z) * (z - players[1].z));
+            if (d0 < ASTEROID_MIN_PLAYER_DIST || d1 < ASTEROID_MIN_PLAYER_DIST)
+                valid = false;
+            for (int j = 0; j < (int)asteroids.size(); j++) {
+                float da = sqrtf((x - asteroids[j].x) * (x - asteroids[j].x) + (z - asteroids[j].z) * (z - asteroids[j].z));
+                if (da < ASTEROID_MIN_SPACING) { valid = false; break; }
+            }
+            attempts++;
+        } while (!valid && attempts < 50);
+        SpawnAsteroidBySize(0, x, z);
     }
+}
+GameState Game::GetGameState() const {
+    GameState gs;
+    gs.currentState = currentState;
+    gs.players[0] = players[0];
+    gs.players[1] = players[1];
+    gs.roundTimer = roundTimer;
+    gs.roundNumber = roundNumber;
+    gs.roundWins[0] = roundWins[0];
+    gs.roundWins[1] = roundWins[1];
+    gs.roundWinner = roundWinner;
+    gs.roundEndTimer = roundEndTimer;
+    return gs;
+}
+
+void Game::ApplyGameState(const GameState& gs) {
+    currentState = gs.currentState;
+    players[0] = gs.players[0];
+    players[1] = gs.players[1];
+    roundTimer = gs.roundTimer;
+    roundNumber = gs.roundNumber;
+    roundWins[0] = gs.roundWins[0];
+    roundWins[1] = gs.roundWins[1];
+    roundWinner = gs.roundWinner;
+    roundEndTimer = gs.roundEndTimer;
 }

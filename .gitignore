@@ -54,3 +54,7 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 .DS_Store
+
+
+#---Claude---
+Project/.claude/
