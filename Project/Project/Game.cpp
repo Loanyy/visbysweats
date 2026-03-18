@@ -1,5 +1,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include "Game.h"
+#include "network.h"
+#include <ws2tcpip.h>
 
 Game::Game() {
     mCounter = 0;
@@ -34,6 +36,10 @@ Game::Game() {
     nextAsteroidId = 0;
     players[0].alive = false;
     players[1].alive = false;
+
+    isMultiplayer = false;
+    remThrust = remLeft = remRight = remShoot = false;
+    mMouseMotionX = mMouseMotionY = 0;
 
     TTF_Init();
     fontLarge = TTF_OpenFont("fonts/ShareTechMono-Regular.ttf", 96);
@@ -858,12 +864,24 @@ void Game::Mouse(int button, int state, int x, int y) {
             joinActive = false;
             if (lobbyCode[0] == '\0') {
                 isHost = true;
-                sprintf(lobbyCode, "%c%c%c%c%c%c",
-                    'A' + rand() % 26, 'A' + rand() % 26, 'A' + rand() % 26,
-                    '0' + rand() % 10, '0' + rand() % 10, '0' + rand() % 10);
+                isMultiplayer = true;
                 lobbyReady = false;
+
+                char hostname[256];
+                char hostIP[20] = "127.0.0.1";
+                gethostname(hostname, sizeof(hostname));
+                struct addrinfo hints {}, * res;
+                hints.ai_family = AF_INET;
+                if (getaddrinfo(hostname, NULL, &hints, &res) == 0) {
+                    sockaddr_in* addr = (sockaddr_in*)res->ai_addr;
+                    inet_ntop(AF_INET, &addr->sin_addr, hostIP, sizeof(hostIP));
+                    freeaddrinfo(res);
+                }
+                strcpy(lobbyCode, hostIP);
+                NetConnect("127.0.0.1");
             }
         }
+
         if (x >= bx && x <= bx + bw && y >= joinY && y <= joinY + bh) {
             lobbyChoice = 1;
             isHost = false;
@@ -1108,29 +1126,20 @@ InputState Game::BuildInputState(int id) {
         inp.shoot = keys[' '];
     }
     else {
-        inp.rotateLeft = keys['j'];
-        inp.rotateRight = keys['l'];
-        inp.thrustForward = keys['i'];
-        inp.shoot = keys['k'];
+        if (isMultiplayer && NetGetPlayerId() == 0) {
+            inp.thrustForward = remThrust;
+            inp.rotateLeft = remLeft;
+            inp.rotateRight = remRight;
+            inp.shoot = remShoot;
+        }
+        else {
+            inp.rotateLeft = keys['j'];
+            inp.rotateRight = keys['l'];
+            inp.thrustForward = keys['i'];
+            inp.shoot = keys['k'];
+        }
     }
     return inp;
-}
-
-void Game::Update(float dt) {
-    switch (currentState) {
-    case STATE_MAIN_MENU:
-    case STATE_RULES:
-    case STATE_CREDITS:
-    case STATE_LOBBY:
-        break;
-    case STATE_PLAYING:
-        UpdatePlaying(dt);
-        break;
-    case STATE_ROUND_END:
-    case STATE_MATCH_END:
-        UpdateRoundEnd(dt);
-        break;
-    }
 }
 
 void Game::SpawnProjectile(int playerId) {
@@ -1241,4 +1250,53 @@ void Game::ApplyGameState(const GameState& gs) {
     roundWins[1] = gs.roundWins[1];
     roundWinner = gs.roundWinner;
     roundEndTimer = gs.roundEndTimer;
+}
+
+void Game::Update(float dt) {
+    switch (currentState) {
+    case STATE_LOBBY:
+        // Verifica daca ambii jucatori s-au conectat
+        if (isMultiplayer && NetIsStarted() && !lobbyReady) {
+            lobbyReady = true;
+            ResetMatch();
+            SetState(STATE_PLAYING);
+        }
+        break;
+
+    case STATE_PLAYING:
+        if (isMultiplayer) {
+            if (NetGetPlayerId() == 0) {
+                // HOST: citeste input JOINER, ruleaza logica, trimite state
+                NetGetInput(remThrust, remLeft, remRight, remShoot);
+                UpdatePlaying(dt);
+                GameState gs = GetGameState();
+                NetSendState(gs, asteroids, projectiles);
+            }
+            else {
+                // JOINER: trimite input, primeste state de la HOST
+                InputState inp = BuildInputState(1);
+                NetSendInput(inp.thrustForward, inp.rotateLeft,
+                    inp.rotateRight, inp.shoot);
+                GameState gs;
+                std::vector<Asteroid> ast;
+                std::vector<Projectile> prj;
+                if (NetGetState(gs, ast, prj)) {
+                    ApplyGameState(gs);
+                    asteroids = ast;
+                    projectiles = prj;
+                }
+            }
+        }
+        else {
+            UpdatePlaying(dt);
+        }
+        break;
+
+    case STATE_ROUND_END:
+    case STATE_MATCH_END:
+        UpdateRoundEnd(dt);
+        break;
+
+    default: break;
+    }
 }

@@ -6,50 +6,70 @@ HOST = '0.0.0.0'
 PORT = 5050
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind((HOST, PORT))
 server.listen()
 
-jucatori = []
-date_jucatori = {}
+clients = [None, None]
+lock = threading.Lock()
+
+def recv_line(conn):
+    data = b''
+    while True:
+        ch = conn.recv(1)
+        if not ch:
+            raise ConnectionError("disconnected")
+        if ch == b'\n':
+            return data.decode('utf-8')
+        data += ch
+
+def send_line(conn, msg):
+    conn.sendall((msg + '\n').encode('utf-8'))
 
 def handle_client(conn, player_id):
-    print(f"Player {player_id} conectat!")
-    
-  
-    conn.send(json.dumps({"player_id": player_id}).encode('utf-8'))
-
+    print(f"[Player {player_id}] connected")
     while True:
         try:
-          
-            date_brute = conn.recv(4096).decode('utf-8')
-            date = json.loads(date_brute)
-
-            
-            date_jucatori[player_id] = date
-
-            
-            alt_id = 1 if player_id == 0 else 0
-            if alt_id in date_jucatori:
-                alt_conn = jucatori[alt_id]
-                alt_conn.send(json.dumps(date_jucatori[player_id]).encode('utf-8'))
-
-        except:
-            print(f"Player {player_id} deconectat!")
-            jucatori[player_id] = None
+            msg = recv_line(conn)
+            other_id = 1 - player_id
+            with lock:
+                other = clients[other_id]
+            if other:
+                try:
+                    send_line(other, msg)
+                except:
+                    pass
+        except Exception as e:
+            print(f"[Player {player_id}] disconnected")
+            with lock:
+                clients[player_id] = None
+            conn.close()
             break
 
 def start():
-    print("Server pornit astept jucatori...")
-    while len(jucatori) < 2:
-        conn, addr = server.accept()
-        player_id = len(jucatori)
-        jucatori.append(conn)
-        
-        thread = threading.Thread(target=handle_client, args=(conn, player_id))
-        thread.start()
+    print("Server pornit, astept jucatori...")
 
-    print("Ambii jucatori conectati - jocul incepe!")
-    for conn in jucatori:
-        conn.send(json.dumps({"status": "START"}).encode('utf-8'))
+    conn0, addr0 = server.accept()
+    with lock:
+        clients[0] = conn0
+    print(f"[HOST] conectat: {addr0}")
+    send_line(conn0, json.dumps({"player_id": 0}))
+
+    conn1, addr1 = server.accept()
+    with lock:
+        clients[1] = conn1
+    print(f"[JOINER] conectat: {addr1}")
+    send_line(conn1, json.dumps({"player_id": 1}))
+
+    print("Ambii conectati - START!")
+    send_line(conn0, json.dumps({"status": "START"}))
+    send_line(conn1, json.dumps({"status": "START"}))
+
+    t0 = threading.Thread(target=handle_client, args=(conn0, 0), daemon=True)
+    t1 = threading.Thread(target=handle_client, args=(conn1, 1), daemon=True)
+    t0.start()
+    t1.start()
+    t0.join()
+    t1.join()
 
 start()
