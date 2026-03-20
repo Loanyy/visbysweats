@@ -812,9 +812,6 @@ void Game::NormalKeys(unsigned char key, int state) {
 
 void Game::SpecialKeys(int key, int state) {
     (void)key; (void)state;
-
-    (void)key; (void)state;
-
     if (currentState == STATE_MAIN_MENU) {
         if (key == SDLK_UP)   menuSelection = (menuSelection + 3) % 4;
         if (key == SDLK_DOWN) menuSelection = (menuSelection + 1) % 4;
