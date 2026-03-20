@@ -21,7 +21,7 @@ static bool              g_hasMsg = false;
 static std::string       g_nickMsg;
 static bool              g_hasNick = false;
 
-static bool g_remoteReady = false;
+static std::atomic<bool> g_remoteReady{ false };
 
 static std::string RecvLine() {
     std::string line;
@@ -116,6 +116,9 @@ bool NetConnect(const char* ip, int port) {
     g_conn = true;
     g_started = false;
     g_pid = -1;
+    g_remoteReady = false;
+    g_hasNick = false;
+    g_hasMsg = false;
     std::thread(RecvThread).detach();
     return true;
 }
