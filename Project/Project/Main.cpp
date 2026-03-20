@@ -78,7 +78,7 @@ static void mainLoop() {
                     }
                     if ((key == SDLK_RETURN || key == SDLK_KP_ENTER) && G.nicknameLen > 0) {
                         G.enteringNickname = false;
-                        strcpy_s(G.player1Name, G.nickname);
+                        // Don't assign to player1Name yet - will be set after connection
                         G.SetState(STATE_LOBBY);
                     }
                     break;

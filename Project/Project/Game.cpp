@@ -1440,9 +1440,14 @@ void Game::Update(float dt) {
                 if (NetGetNickname(recvName, 32)) {
                     opponentConnected = true;
                     if (NetGetPlayerId() == 0) {
+                        // I'm host (player 0, left side)
+                        strcpy(player1Name, nickname);
                         strcpy(player2Name, recvName);
-                    } else {
+                    }
+                    else {
+                        // I'm joiner (player 1, right side)
                         strcpy(player1Name, recvName);
+                        strcpy(player2Name, nickname);
                     }
                 }
             }
