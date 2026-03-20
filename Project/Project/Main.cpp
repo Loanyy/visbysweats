@@ -37,7 +37,7 @@ static void createSurface() {
 static void mainLoop() {
     SDL_Event event;
     bool quit = false;
-    int key, state;
+    int key;
     Uint32 LastTime = SDL_GetTicks();
     float deltatime = 0.0f;
 
@@ -64,7 +64,6 @@ static void mainLoop() {
 
             case SDL_KEYDOWN:
                 key = event.key.keysym.sym;
-                state = SDL_GetModState();
 
                 if (key == SDLK_ESCAPE) {
                     if (G.currentState == STATE_MAIN_MENU) quit = true;
@@ -111,7 +110,9 @@ static void mainLoop() {
                             char hostname[256];
                             char hostIP[20] = "127.0.0.1";
                             gethostname(hostname, sizeof(hostname));
-                            struct addrinfo hints {}, * res;
+                            struct addrinfo hints;
+                            memset(&hints, 0, sizeof(hints));
+                            struct addrinfo* res;
                             hints.ai_family = AF_INET;
                             if (getaddrinfo(hostname, NULL, &hints, &res) == 0) {
                                 sockaddr_in* addr = (sockaddr_in*)res->ai_addr;
@@ -132,8 +133,8 @@ static void mainLoop() {
                 }
 
                 if (key < 256) G.keys[key] = true;
-                G.SpecialKeys(key, state);
-                if (key < 128) G.NormalKeys(key, state);
+                G.SpecialKeys(key, 0);
+                if (key < 128) G.NormalKeys((unsigned char)key, 0);
                 break;
 
             case SDL_TEXTINPUT:
@@ -175,7 +176,7 @@ static void mainLoop() {
     }
 }
 
-int main(int argc, char* argv[]) {
+int main(int, char**) {
     createSurface();
     NetInit();
     G.InitGFX();

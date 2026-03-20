@@ -380,7 +380,6 @@ void Game::DrawLobby() {
     float bx = mW * 0.25f;
     float bw = mW * 0.5f;
     float bh = mH * 0.08f;
-    bool mouseMoved = (mMouseX != lastMouseX || mMouseY != lastMouseY);
     float hostY = mH * 0.2f;
     float joinY = mH * 0.32f;
     bool hoverHost = (mMouseX >= bx && mMouseX <= bx + bw &&
@@ -802,9 +801,12 @@ void Game::Draw() {
     mCounter++;
 }
 
-void Game::NormalKeys(unsigned char key, int state) {}
+void Game::NormalKeys(unsigned char key, int state) {
+    (void)key; (void)state;
+}
 
 void Game::SpecialKeys(int key, int state) {
+    (void)key; (void)state;
 
     if (currentState == STATE_MAIN_MENU) {
         if (key == SDLK_UP)   menuSelection = (menuSelection + 3) % 4;
