@@ -1493,13 +1493,24 @@ void Game::Update(float dt) {
                 }
             }
             else {
-                // JOINER: send input at 30Hz, receive state every frame
+                // JOINER: send input at 30Hz
                 netSendTimer += dt;
                 if (netSendTimer >= 1.0f / 30.0f) {
                     netSendTimer = 0.0f;
                     InputState inp = BuildInputState(1);
                     NetSendInput(inp.thrustForward, inp.rotateLeft,
                         inp.rotateRight, inp.shoot);
+                }
+                // Run local simulation for smooth visuals
+                UpdatePlaying(dt);
+                // Override with server state when available
+                GameState gs;
+                std::vector<Asteroid> ast;
+                std::vector<Projectile> prj;
+                if (NetGetState(gs, ast, prj)) {
+                    ApplyGameState(gs);
+                    asteroids = ast;
+                    projectiles = prj;
                 }
             }
         }

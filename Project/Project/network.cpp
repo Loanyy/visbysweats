@@ -23,14 +23,26 @@ static bool              g_hasNick = false;
 
 static std::atomic<bool> g_remoteReady{ false };
 
+static char g_recvBuf[65536];
+static int  g_recvLen = 0;
+
 static std::string RecvLine() {
-    std::string line;
-    char c;
     while (true) {
-        int r = recv(g_sock, &c, 1, 0);
+        // Check if we already have a complete line in buffer
+        for (int i = 0; i < g_recvLen; i++) {
+            if (g_recvBuf[i] == '\n') {
+                std::string line(g_recvBuf, i);
+                int remaining = g_recvLen - i - 1;
+                if (remaining > 0)
+                    memmove(g_recvBuf, g_recvBuf + i + 1, remaining);
+                g_recvLen = remaining;
+                return line;
+            }
+        }
+        // Need more data
+        int r = recv(g_sock, g_recvBuf + g_recvLen, sizeof(g_recvBuf) - g_recvLen, 0);
         if (r <= 0) throw std::runtime_error("disconnected");
-        if (c == '\n') return line;
-        line += c;
+        g_recvLen += r;
     }
 }
 
