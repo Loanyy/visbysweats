@@ -5,15 +5,21 @@ import json
 HOST = '0.0.0.0'
 PORT = 5050
 
+recv_buffers = {}
+
 def recv_line(conn):
-    data = b''
+    if conn not in recv_buffers:
+        recv_buffers[conn] = b''
     while True:
-        ch = conn.recv(1)
-        if not ch:
+        idx = recv_buffers[conn].find(b'\n')
+        if idx >= 0:
+            line = recv_buffers[conn][:idx].decode('utf-8')
+            recv_buffers[conn] = recv_buffers[conn][idx+1:]
+            return line
+        chunk = conn.recv(4096)
+        if not chunk:
             raise ConnectionError("disconnected")
-        if ch == b'\n':
-            return data.decode('utf-8')
-        data += ch
+        recv_buffers[conn] += chunk
 
 def send_line(conn, msg):
     conn.sendall((msg + '\n').encode('utf-8'))

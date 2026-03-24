@@ -90,7 +90,7 @@ static std::string GetS(const std::string& j, const char* key) {
 
 static void RecvThread() {
     try {
-        while (g_conn) {
+        while (g_conn && g_sock != INVALID_SOCKET) {
             std::string line = RecvLine();
             if (line.find("START") != std::string::npos)
                 g_started = true;
@@ -133,6 +133,14 @@ bool NetInit() {
 }
 
 bool NetConnect(const char* ip, int port) {
+    // Clean up any previous connection
+    if (g_sock != INVALID_SOCKET) {
+        g_conn = false;
+        closesocket(g_sock);
+        g_sock = INVALID_SOCKET;
+        SDL_Delay(100); // Let old recv thread die
+    }
+
     g_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (g_sock == INVALID_SOCKET) return false;
 
@@ -163,9 +171,11 @@ bool NetConnect(const char* ip, int port) {
 void NetDisconnect() {
     g_conn = false;
     if (g_sock != INVALID_SOCKET) {
+        shutdown(g_sock, SD_BOTH);
         closesocket(g_sock);
         g_sock = INVALID_SOCKET;
     }
+    SDL_Delay(50); // Let recv thread finish
     g_started = false;
     g_pid = -1;
     g_remoteReady = false;
@@ -175,6 +185,7 @@ void NetDisconnect() {
     g_recvLen = 0;
     g_lastMsg.clear();
     g_nickMsg.clear();
+    g_ping = 0.0f;
 }
 
 bool NetIsConnected() { return g_conn; }

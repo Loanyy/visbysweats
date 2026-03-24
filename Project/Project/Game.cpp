@@ -1633,6 +1633,7 @@ void Game::Update(float dt) {
 
             if (NetGetPlayerId() == 0) {
                 // HOST: read joiner input, run logic, send state at 30Hz
+                if (!NetIsConnected()) break;
                 NetGetInput(remThrust, remLeft, remRight, remShoot);
                 UpdatePlaying(dt);
                 netSendTimer += dt;
@@ -1739,7 +1740,7 @@ void Game::Update(float dt) {
                 }
             }
             // Host still sends state at 30Hz so joiner sees the end screen
-            if (NetGetPlayerId() == 0) {
+            if (NetGetPlayerId() == 0 && NetIsConnected()) {
                 netSendTimer += dt;
                 if (netSendTimer >= 1.0f / 30.0f) {
                     netSendTimer = 0.0f;
