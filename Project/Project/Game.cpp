@@ -29,6 +29,7 @@ Game::Game() {
     remoteReady = false;
     localRematch = false;
     remoteRematch = false;
+    opponentDisconnected = false;
     nicknameSent = false;
     strcpy(opponentName, "");
     netSendTimer = 0.0f;
@@ -176,10 +177,12 @@ void Game::SetState(GameStateEnum s) {
 
 
     if (s == STATE_MAIN_MENU) {
+
         if (isMultiplayer) {
             NetDisconnect();
             isMultiplayer = false;
         }
+
         strcpy(lobbyCode, "");
         strcpy(lobbyCodeInput, "");
         lobbyCodeLen = 0;
@@ -574,8 +577,10 @@ void Game::DrawRoundEnd() {
     char msg[128];
     if (roundWinner == -1)
         sprintf(msg, "DRAW!");
-    else
-        sprintf(msg, "P%d WINS THE ROUND!", roundWinner + 1);
+    else {
+        const char* winnerName = (roundWinner == 0) ? player1Name : player2Name;
+        sprintf(msg, "%s WINS THE ROUND!", winnerName);
+    }
     int tw, th;
     TTF_SizeText(fontLarge, msg, &tw, &th);
     DrawText(msg, (mW - tw) * 0.5f, mH * 0.32f, fontLarge,
@@ -600,22 +605,52 @@ void Game::DrawMatchEnd() {
     Begin2D(mW, mH);
     DrawRect2D(mW * 0.15f, mH * 0.2f, mW * 0.7f, mH * 0.5f, 10, 10, 50, 220);
 
-    int winner = (roundWins[0] >= ROUNDS_TO_WIN) ? 1 : 2;
+    // Disconnect message
+    if (opponentDisconnected) {
+        char dcMsg[64];
+        if (NetGetPlayerId() == 0)
+            sprintf(dcMsg, "%s left the game!", player2Name);
+        else
+            sprintf(dcMsg, "%s left the game!", player1Name);
+        int dw, dh;
+        TTF_SizeText(fontMedium, dcMsg, &dw, &dh);
+        DrawText(dcMsg, (mW - dw) * 0.5f, mH * 0.22f, fontMedium, 255, 100, 100);
+    }
+
+    int winIdx = (roundWins[0] >= ROUNDS_TO_WIN) ? 0 : 1;
+    const char* winnerName = (winIdx == 0) ? player1Name : player2Name;
     char msg[128];
-    sprintf(msg, "P%d WINS THE MATCH!", winner);
+    sprintf(msg, "%s WINS!", winnerName);
     int tw, th;
     TTF_SizeText(fontLarge, msg, &tw, &th);
-    unsigned char cr = (winner == 1) ? 0 : 255;
-    unsigned char cg = (winner == 1) ? 255 : 50;
-    unsigned char cb = (winner == 1) ? 255 : 50;
-    DrawText(msg, (mW - tw) * 0.5f, mH * 0.22f, fontLarge, cr, cg, cb);
+    unsigned char cr = (winIdx == 0) ? 0 : 255;
+    unsigned char cg = (winIdx == 0) ? 255 : 50;
+    unsigned char cb = (winIdx == 0) ? 255 : 50;
+    float msgY = opponentDisconnected ? mH * 0.30f : mH * 0.22f;
+    DrawText(msg, (mW - tw) * 0.5f, msgY, fontLarge, cr, cg, cb);
 
     char score[64];
     sprintf(score, "Final: %d - %d", roundWins[0], roundWins[1]);
     TTF_SizeText(fontMedium, score, &tw, &th);
-    DrawText(score, (mW - tw) * 0.5f, mH * 0.35f, fontMedium, 200, 200, 200);
+    float scoreY = opponentDisconnected ? mH * 0.40f : mH * 0.35f;
+    DrawText(score, (mW - tw) * 0.5f, scoreY, fontMedium, 200, 200, 200);
 
-    if (isMultiplayer) {
+    if (isMultiplayer && opponentDisconnected) {
+        // Only show return to lobby
+        float rbx = mW * 0.3f;
+        float rby = mH * 0.55f;
+        float rbw = mW * 0.4f;
+        float rbh = mH * 0.08f;
+        bool hoverRet = (mMouseX >= rbx && mMouseX <= rbx + rbw &&
+            mMouseY >= rby && mMouseY <= rby + rbh);
+        DrawRect2D(rbx, rby, rbw, rbh, hoverRet ? 80 : 50, hoverRet ? 120 : 80, hoverRet ? 200 : 150);
+        const char* retTxt = "RETURN TO LOBBY";
+        int rtw2, rth2;
+        TTF_SizeText(fontMedium, retTxt, &rtw2, &rth2);
+        DrawText(retTxt, (mW - rtw2) * 0.5f, rby + (rbh - rth2) * 0.5f,
+            fontMedium, 255, 255, 255);
+    }
+    else if (isMultiplayer) {
         // Rematch status
         char remStatus[128];
         sprintf(remStatus, "You: %s  |  Opponent: %s",
@@ -1083,6 +1118,16 @@ void Game::Mouse(int button, int state, int x, int y) {
     }
 
     if (currentState == STATE_MATCH_END && isMultiplayer && button == SDL_BUTTON_LEFT && state == SDL_RELEASED) {
+        if (opponentDisconnected) {
+            float rbx = mW * 0.3f;
+            float rby = mH * 0.55f;
+            float rbw = mW * 0.4f;
+            float rbh = mH * 0.08f;
+            if (x >= rbx && x <= rbx + rbw && y >= rby && y <= rby + rbh) {
+                SetState(STATE_MAIN_MENU);
+            }
+            return;
+        }
         if (!localRematch) {
             float rbx = mW * 0.2f;
             float rby = mH * 0.53f;
@@ -1511,6 +1556,20 @@ void Game::ApplyGameState(const GameState& gs) {
 }
 
 void Game::Update(float dt) {
+
+    // Global multiplayer disconnect check
+    if (isMultiplayer && !opponentDisconnected && !NetIsConnected()) {
+        if (currentState == STATE_PLAYING || currentState == STATE_ROUND_END) {
+            opponentDisconnected = true;
+            if (NetGetPlayerId() == 0)
+                roundWins[0] = ROUNDS_TO_WIN;
+            else
+                roundWins[1] = ROUNDS_TO_WIN;
+            SetState(STATE_MATCH_END);
+            return;
+        }
+    }
+
     switch (currentState) {
     case STATE_LOBBY:
         if (isMultiplayer && NetIsConnected()) {
@@ -1579,18 +1638,38 @@ void Game::Update(float dt) {
                     NetSendState(gs, asteroids, projectiles);
                 }
             }
-            else {
+           else {
                 // JOINER: send input at 30Hz
                 netSendTimer += dt;
                 if (netSendTimer >= 1.0f / 30.0f) {
                     netSendTimer = 0.0f;
-                    InputState inp = BuildInputState(1);
+                    InputState inp = BuildInputState(NetGetPlayerId());
                     NetSendInput(inp.thrustForward, inp.rotateLeft,
                         inp.rotateRight, inp.shoot);
                 }
-                // Run local simulation for smooth visuals
-                UpdatePlaying(dt);
-                // Override with server state when available
+                // Local movement only (no collisions, no spawning)
+                for (int i = 0; i < 2; i++) {
+                    Player& p = players[i];
+                    if (!p.alive) continue;
+                    p.x += p.vx * dt;
+                    p.z += p.vz * dt;
+                    if (p.x > WORLD_SIZE) p.x -= 2 * WORLD_SIZE;
+                    if (p.x < -WORLD_SIZE) p.x += 2 * WORLD_SIZE;
+                    if (p.z > WORLD_SIZE) p.z -= 2 * WORLD_SIZE;
+                    if (p.z < -WORLD_SIZE) p.z += 2 * WORLD_SIZE;
+                }
+                // Move projectiles visually
+                for (int i = 0; i < (int)projectiles.size(); i++) {
+                    projectiles[i].x += projectiles[i].vx * dt;
+                    projectiles[i].z += projectiles[i].vz * dt;
+                }
+                // Move asteroids visually
+                for (int i = 0; i < (int)asteroids.size(); i++) {
+                    asteroids[i].x += asteroids[i].vx * dt;
+                    asteroids[i].z += asteroids[i].vz * dt;
+                    asteroids[i].rotation += asteroids[i].rotationspeed * dt;
+                }
+                // Apply server state when available (authoritative)
                 GameState gs;
                 std::vector<Asteroid> ast;
                 std::vector<Projectile> prj;
@@ -1607,11 +1686,38 @@ void Game::Update(float dt) {
         break;
 
     case STATE_ROUND_END:
-        UpdateRoundEnd(dt);
+        if (isMultiplayer && NetGetPlayerId() != 0) {
+            // Joiner: follow host state
+            GameState gs;
+            std::vector<Asteroid> ast;
+            std::vector<Projectile> prj;
+            if (NetGetState(gs, ast, prj)) {
+                ApplyGameState(gs);
+                asteroids = ast;
+                projectiles = prj;
+            }
+            
+        }
+        else {
+            UpdateRoundEnd(dt);
+            // Host: send state during round end so joiner follows
+            if (isMultiplayer && NetGetPlayerId() == 0) {
+                netSendTimer += dt;
+                if (netSendTimer >= 1.0f / 30.0f) {
+                    netSendTimer = 0.0f;
+                    GameState gs = GetGameState();
+                    NetSendState(gs, asteroids, projectiles);
+                }
+            }
+        }
         break;
 
     case STATE_MATCH_END:
         if (isMultiplayer) {
+
+            if (!NetIsConnected() && !opponentDisconnected) {
+                opponentDisconnected = true;
+            }
             // Check remote rematch
             if (!remoteRematch) {
                 remoteRematch = NetGetRematch();

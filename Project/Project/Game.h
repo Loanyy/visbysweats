@@ -79,6 +79,7 @@ public:
     bool remoteReady;
     bool localRematch;
     bool remoteRematch;
+    bool opponentDisconnected;
     bool nicknameSent;
     char opponentName[32];
     float netSendTimer;
