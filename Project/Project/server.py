@@ -47,7 +47,7 @@ def handle_client(conn, player_id):
             break
 
 def start():
-    print("Server pornit, astept jucatori...")
+    print("Server is open and waiting players to join...")
 
     conn0, addr0 = server.accept()
     with lock:
