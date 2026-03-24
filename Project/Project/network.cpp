@@ -23,6 +23,8 @@ static std::string       g_nickMsg;
 static bool              g_hasNick = false;
 
 static std::atomic<bool> g_remoteReady{ false };
+static std::atomic<bool> g_remoteRematch{ false };
+
 
 static std::atomic<float> g_ping{ 0.0f };
 static Uint32 g_pingTime = 0;
@@ -97,6 +99,9 @@ static void RecvThread() {
             if (line.find("\"ready\"") != std::string::npos) {
                 g_remoteReady = true;
             }
+            if (line.find("\"rematch\"") != std::string::npos) {
+                g_remoteRematch = true;
+            }
             if (line.find("\"pong\"") != std::string::npos) {
                 Uint32 now = SDL_GetTicks();
                 g_ping = (float)(now - g_pingTime);
@@ -148,6 +153,8 @@ bool NetConnect(const char* ip, int port) {
     g_hasMsg = false;
     g_lastMsg.clear();
     g_nickMsg.clear();
+    g_remoteRematch = false;
+    g_recvLen = 0;
 
     std::thread(RecvThread).detach();
     return true;
@@ -159,6 +166,15 @@ void NetDisconnect() {
         closesocket(g_sock);
         g_sock = INVALID_SOCKET;
     }
+    g_started = false;
+    g_pid = -1;
+    g_remoteReady = false;
+    g_remoteRematch = false;
+    g_hasMsg = false;
+    g_hasNick = false;
+    g_recvLen = 0;
+    g_lastMsg.clear();
+    g_nickMsg.clear();
 }
 
 bool NetIsConnected() { return g_conn; }
@@ -333,4 +349,12 @@ void NetSendPing() {
 
 float NetGetPing() {
     return g_ping;
+}
+
+void NetSendRematch() {
+    SendLine("{\"type\":\"rematch\"}");
+}
+
+bool NetGetRematch() {
+    return g_remoteRematch;
 }

@@ -77,6 +77,8 @@ public:
     bool opponentConnected;
     bool localReady;
     bool remoteReady;
+    bool localRematch;
+    bool remoteRematch;
     bool nicknameSent;
     char opponentName[32];
     float netSendTimer;

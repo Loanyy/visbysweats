@@ -23,3 +23,5 @@ void NetSendReady();
 bool NetGetReady();
 void NetSendPing();
 float NetGetPing();
+void NetSendRematch();
+bool NetGetRematch();

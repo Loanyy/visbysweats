@@ -27,6 +27,8 @@ Game::Game() {
     opponentConnected = false;
     localReady = false;
     remoteReady = false;
+    localRematch = false;
+    remoteRematch = false;
     nicknameSent = false;
     strcpy(opponentName, "");
     netSendTimer = 0.0f;
@@ -174,6 +176,10 @@ void Game::SetState(GameStateEnum s) {
 
 
     if (s == STATE_MAIN_MENU) {
+        if (isMultiplayer) {
+            NetDisconnect();
+            isMultiplayer = false;
+        }
         strcpy(lobbyCode, "");
         strcpy(lobbyCodeInput, "");
         lobbyCodeLen = 0;
@@ -186,12 +192,8 @@ void Game::SetState(GameStateEnum s) {
         localReady = false;
         remoteReady = false;
         nicknameSent = false;
-
-        if (isMultiplayer) {
-            NetDisconnect();
-            isMultiplayer = false;
-        }
-
+        localRematch = false;
+        remoteRematch = false;
         strcpy(nickname, "");
         nicknameLen = 0;
     }
@@ -606,17 +608,59 @@ void Game::DrawMatchEnd() {
     unsigned char cr = (winner == 1) ? 0 : 255;
     unsigned char cg = (winner == 1) ? 255 : 50;
     unsigned char cb = (winner == 1) ? 255 : 50;
-    DrawText(msg, (mW - tw) * 0.5f, mH * 0.28f, fontLarge, cr, cg, cb);
+    DrawText(msg, (mW - tw) * 0.5f, mH * 0.22f, fontLarge, cr, cg, cb);
 
     char score[64];
     sprintf(score, "Final: %d - %d", roundWins[0], roundWins[1]);
     TTF_SizeText(fontMedium, score, &tw, &th);
-    DrawText(score, (mW - tw) * 0.5f, mH * 0.42f, fontMedium, 200, 200, 200);
+    DrawText(score, (mW - tw) * 0.5f, mH * 0.35f, fontMedium, 200, 200, 200);
 
-    char back[64];
-    sprintf(back, "Returning to menu in %.0fs...", roundEndTimer);
-    TTF_SizeText(fontSmall, back, &tw, &th);
-    DrawText(back, (mW - tw) * 0.5f, mH * 0.55f, fontSmall, 150, 150, 150);
+    if (isMultiplayer) {
+        // Rematch status
+        char remStatus[128];
+        sprintf(remStatus, "You: %s  |  Opponent: %s",
+            localRematch ? "REMATCH" : "---",
+            remoteRematch ? "REMATCH" : "---");
+        int rsw, rsh;
+        TTF_SizeText(fontSmall, remStatus, &rsw, &rsh);
+        DrawText(remStatus, (mW - rsw) * 0.5f, mH * 0.45f, fontSmall, 150, 150, 150);
+
+        // REMATCH button
+        if (!localRematch) {
+            float rbx = mW * 0.2f;
+            float rby = mH * 0.53f;
+            float rbw = mW * 0.28f;
+            float rbh = mH * 0.08f;
+            bool hoverRem = (mMouseX >= rbx && mMouseX <= rbx + rbw &&
+                mMouseY >= rby && mMouseY <= rby + rbh);
+            DrawRect2D(rbx, rby, rbw, rbh, 0, hoverRem ? 200 : 150, 0);
+            const char* remTxt = "REMATCH";
+            int rtw, rth;
+            TTF_SizeText(fontMedium, remTxt, &rtw, &rth);
+            DrawText(remTxt, rbx + (rbw - rtw) * 0.5f, rby + (rbh - rth) * 0.5f,
+                fontMedium, 255, 255, 255);
+        }
+
+        // QUIT button
+        float qbx = mW * 0.52f;
+        float qby = mH * 0.53f;
+        float qbw = mW * 0.28f;
+        float qbh = mH * 0.08f;
+        bool hoverQuit = (mMouseX >= qbx && mMouseX <= qbx + qbw &&
+            mMouseY >= qby && mMouseY <= qby + qbh);
+        DrawRect2D(qbx, qby, qbw, qbh, hoverQuit ? 200 : 150, 0, 0);
+        const char* quitTxt = "QUIT";
+        int qtw, qth;
+        TTF_SizeText(fontMedium, quitTxt, &qtw, &qth);
+        DrawText(quitTxt, qbx + (qbw - qtw) * 0.5f, qby + (qbh - qth) * 0.5f,
+            fontMedium, 255, 255, 255);
+    }
+    else {
+        char back[64];
+        sprintf(back, "Returning to menu in %.0fs...", roundEndTimer);
+        TTF_SizeText(fontSmall, back, &tw, &th);
+        DrawText(back, (mW - tw) * 0.5f, mH * 0.55f, fontSmall, 150, 150, 150);
+    }
 
     End2D();
     SDL_SetWindowTitle(gScreen, "ASTEROID 3D");
@@ -945,6 +989,7 @@ void Game::SpecialKeys(int key, int state) {
 void Game::Mouse(int button, int state, int x, int y) {
     mMouseButton = button; mMouseState = state;
     mMouseX = x; mMouseY = y;
+
     if (currentState == STATE_MAIN_MENU && button == SDL_BUTTON_LEFT && state == SDL_RELEASED) {
         float bx = mW * 0.3f;
         float bw = mW * 0.4f;
@@ -966,12 +1011,14 @@ void Game::Mouse(int button, int state, int x, int y) {
             }
         }
     }
+
     if (currentState == STATE_LOBBY && button == SDL_BUTTON_LEFT && state == SDL_RELEASED) {
         float bx = mW * 0.25f;
         float bw = mW * 0.5f;
         float bh = mH * 0.08f;
         float hostY = mH * 0.15f;
         float joinY = mH * 0.25f;
+
         if (x >= bx && x <= bx + bw && y >= hostY && y <= hostY + bh) {
             lobbyChoice = 0;
             joinActive = false;
@@ -993,12 +1040,14 @@ void Game::Mouse(int button, int state, int x, int y) {
                 NetConnect("127.0.0.1");
             }
         }
+
         if (x >= bx && x <= bx + bw && y >= joinY && y <= joinY + bh) {
             lobbyChoice = 1;
             isHost = false;
             strcpy(lobbyCode, "");
             joinActive = true;
         }
+
         if (isHost && opponentConnected && !localReady) {
             float rbx = mW * 0.3f;
             float rby = mH * 0.72f;
@@ -1009,6 +1058,7 @@ void Game::Mouse(int button, int state, int x, int y) {
                 NetSendReady();
             }
         }
+
         if (!isHost && joinActive && opponentConnected && !localReady) {
             float rbx = mW * 0.3f;
             float rby = mH * 0.62f;
@@ -1019,6 +1069,7 @@ void Game::Mouse(int button, int state, int x, int y) {
                 NetSendReady();
             }
         }
+
         if (isHost && localReady && remoteReady) {
             float sbx = mW * 0.3f;
             float sby = mH * 0.82f;
@@ -1028,6 +1079,26 @@ void Game::Mouse(int button, int state, int x, int y) {
                 ResetMatch();
                 SetState(STATE_PLAYING);
             }
+        }
+    }
+
+    if (currentState == STATE_MATCH_END && isMultiplayer && button == SDL_BUTTON_LEFT && state == SDL_RELEASED) {
+        if (!localRematch) {
+            float rbx = mW * 0.2f;
+            float rby = mH * 0.53f;
+            float rbw = mW * 0.28f;
+            float rbh = mH * 0.08f;
+            if (x >= rbx && x <= rbx + rbw && y >= rby && y <= rby + rbh) {
+                localRematch = true;
+                NetSendRematch();
+            }
+        }
+        float qbx = mW * 0.52f;
+        float qby = mH * 0.53f;
+        float qbw = mW * 0.28f;
+        float qbh = mH * 0.08f;
+        if (x >= qbx && x <= qbx + qbw && y >= qby && y <= qby + qbh) {
+            SetState(STATE_MAIN_MENU);
         }
     }
 }
@@ -1536,8 +1607,53 @@ void Game::Update(float dt) {
         break;
 
     case STATE_ROUND_END:
-    case STATE_MATCH_END:
         UpdateRoundEnd(dt);
+        break;
+
+    case STATE_MATCH_END:
+        if (isMultiplayer) {
+            // Check remote rematch
+            if (!remoteRematch) {
+                remoteRematch = NetGetRematch();
+            }
+            // Both want rematch
+            if (localRematch && remoteRematch) {
+                localRematch = false;
+                remoteRematch = false;
+                ResetMatch();
+                SetState(STATE_PLAYING);
+                // Host sends state so joiner follows
+                if (NetGetPlayerId() == 0) {
+                    GameState gs = GetGameState();
+                    NetSendState(gs, asteroids, projectiles);
+                }
+            }
+            // Host still sends state at 30Hz so joiner sees the end screen
+            if (NetGetPlayerId() == 0) {
+                netSendTimer += dt;
+                if (netSendTimer >= 1.0f / 30.0f) {
+                    netSendTimer = 0.0f;
+                    GameState gs = GetGameState();
+                    NetSendState(gs, asteroids, projectiles);
+                }
+            }
+            else {
+                // Joiner receives state
+                GameState gs;
+                std::vector<Asteroid> ast;
+                std::vector<Projectile> prj;
+                if (NetGetState(gs, ast, prj)) {
+                    if (gs.currentState == STATE_PLAYING) {
+                        ApplyGameState(gs);
+                        asteroids = ast;
+                        projectiles = prj;
+                    }
+                }
+            }
+        }
+        else {
+            UpdateRoundEnd(dt);
+        }
         break;
 
     default: break;
