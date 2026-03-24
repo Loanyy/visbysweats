@@ -130,6 +130,10 @@ bool NetInit() {
 bool NetConnect(const char* ip, int port) {
     g_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (g_sock == INVALID_SOCKET) return false;
+
+    int flag = 1;
+    setsockopt(g_sock, IPPROTO_TCP, TCP_NODELAY, (const char*)&flag, sizeof(flag));
+
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons((u_short)port);

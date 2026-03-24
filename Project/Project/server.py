@@ -38,17 +38,20 @@ def handle_client(conn, player_id, clients, lock):
         conn.close()
 
 def run_match(server):
+    import socket as sock_mod
     clients = [None, None]
     lock = threading.Lock()
 
     print("\n--- Waiting for players ---")
     conn0, addr0 = server.accept()
+    conn0.setsockopt(sock_mod.IPPROTO_TCP, sock_mod.TCP_NODELAY, 1)
     with lock:
         clients[0] = conn0
     print(f"[HOST] connected: {addr0}")
     send_line(conn0, json.dumps({"player_id": 0}))
 
     conn1, addr1 = server.accept()
+    conn1.setsockopt(sock_mod.IPPROTO_TCP, sock_mod.TCP_NODELAY, 1)
     with lock:
         clients[1] = conn1
     print(f"[JOINER] connected: {addr1}")
