@@ -1575,7 +1575,7 @@ void Game::ApplyGameState(const GameState& gs) {
 void Game::Update(float dt) {
 
     // Global multiplayer disconnect check
-    if (isMultiplayer && !opponentDisconnected && !NetIsConnected()) {
+    if (isMultiplayer && !opponentDisconnected && opponentConnected && !NetIsConnected()) {
         if (currentState == STATE_PLAYING || currentState == STATE_ROUND_END ||
             currentState == STATE_MATCH_END || currentState == STATE_LOBBY) {
             opponentDisconnected = true;
